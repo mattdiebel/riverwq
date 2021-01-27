@@ -3,7 +3,7 @@
 
 # Tasks in this script:
 # 1. Set up model info 
-# 2. Assemble sample dataset from SWIMS and/or NWIS
+# 2. Assemble sample dataset from user-defined dataset and/or NWIS
 # 3. Download flow data
 # 4. Prune sparse periods from datasets
 
@@ -17,28 +17,12 @@ dpath = "C:/DNR/WQ/LTT/EGRET/LTT/data/"
 ampath = "C:/DNR/WQ/LTT/EGRET/LTT/app/models/"
 adpath = "C:/DNR/WQ/LTT/EGRET/LTT/app/data/"
 
-# Load data (if the data query doesn't work, try opening the query in Access first, then running it again in R)
-db = odbcConnectAccess("C:/DNR/WQ/LTT/LTT.mdb")
-stations = sqlFetch(db, "stations", as.is=TRUE)
-parameters = sqlFetch(db, "parameters", as.is=TRUE)
-data = sqlFetch(db, "LTT_samples", as.is=TRUE)
-odbcClose(db)
-
-# Format data
-stations = stations[order(stations$station_name),]
-rownames(stations) = NULL
-parameters = parameters[order(parameters$SWIMS_code),]
-rownames(parameters) = NULL
+# Load files
+load(paste0(dpath,"stations.RData"))
+load(paste0(dpath,"parameters.RData"))
+load(paste0(dpath,"data.RData"))
 n = nrow(stations)
 np = nrow(parameters)
-data$DATE = as.Date(data$START_DATE_TIME)
-data$RESULT_AMT = as.numeric(data$RESULT_AMT)
-data$LOD_AMT = as.numeric(data$LOD_AMT)
-
-# Save data
-save(data, file=paste0(dpath,"data.RData"))
-save(stations, file=paste0(adpath,"stations.RData"))
-save(parameters, file=paste0(adpath,"parameters.RData"))
 
 # Loop through stations and parameters
 for (s in 1:n) {
@@ -64,7 +48,7 @@ for (s in 1:n) {
 		# Assemble sample dataset
 		  export = data.frame()
   		
-		  # SWIMS database
+		# SWIMS database
   		SWIMS = data[data$STATION_ID==stations$swims_id[s] & data$DNR_PARAMETER_CODE==parameters$SWIMS_code[p],]
   		if(nrow(SWIMS)>0) {
     		SWIMS$REMARK = NA
@@ -78,7 +62,7 @@ for (s in 1:n) {
     		export = SWIMS
   		}
 
-    	# NWIS database	
+    		# NWIS database	
   		NWIS = try(readNWISSample(stations$usgs_station_id[s], parameters$USGS_code[p]), silent=TRUE)
   		if (is.data.frame(NWIS)) {
   		  if (nrow(NWIS)>0) {
@@ -151,66 +135,14 @@ for (s in 1:n) {
   		  Daily = try(readNWISDaily(stations$flow_station_id[s], "00060", QstartDate, QendDate), silent=TRUE)
   		}
 		
-		# Fox at Appleton flow
-		if (stations$flow_station_id[s]=="04084445") {
-		  Daily = readNWISdv(stations$flow_station_id[s], "00060", QstartDate, QendDate)
-		  Daily = data.frame(Date=Daily$Date, Q=Daily$X_.Primary.Stream.Flow._00060_00003)
-		  file = "Fox_Appleton_Q.csv"
-		  write.csv(Daily, paste(dpath, file, sep=""), row.names=FALSE)
-		  Daily = readUserDaily(dpath, file)
-		}
-
-		# Fox at Oshkosh flow
-		if (stations$abbrev[s]=="FXO") {
-		  Daily$Q = Daily$Q - mean(Daily$Q, na.rm=TRUE)*0.001*0.999
-		  for (d in 8:nrow(Daily)) {
-		    Daily$Q[d] = mean(Daily$Q[(d-7):d])
-		  }
-		  Daily$Q[1:7] = mean(Daily$Q[1:7])
-		  Daily$LogQ = log(Daily$Q)
-		}		
-		
 		# Adjust flow with drainage area ratio
 		Daily$Q = Daily$Q/stations$flow_wq_ratio[s]
 		Daily$LogQ = log(Daily$Q)
-		
-		# Bad River flow
-		if (stations$abbrev[s]=="BAD") {
-			Bad = readNWISDaily("04027000", "00060", QstartDate, QendDate)
-			Bad$Q = Bad$Q/0.956 # Drainage area ratio of Bad River gage to Bad River at White River confluence
-			White = readNWISDaily("04027500", "00060", QstartDate, QendDate)
-			White$Q = White$Q/0.807 # Drainage area ratio of White River gage to White River at Bad River confluence
-			BWQ = merge(Bad[,c("Date","Q")], White[,c("Date","Q")], by="Date")
-			Daily = Bad
-			Daily$Q = BWQ$Q.x + BWQ$Q.y
-			Daily$LogQ = log(Daily$Q)
-		}
 		
 		# Save eList
 		eList = mergeReport(INFO, Daily, Sample)
 		eList$SampleAll = SampleAll
 		save(eList, file=paste0(ampath, parameters$abbrev[p], "_", stations$swims_id[s], ".RData"))
-		
-		# Remove Manitowoc River 2002-05 TP and PO4 data (very wide confidence intervals)
-		if (stations$abbrev[s]=="MAN") {
-		  if(parameters$abbrev[p]=="TP" | parameters$abbrev[p]=="PO4") {
-		    Sample = Sample[Sample$Date<as.Date("2001-10-01") | Sample$Date>as.Date("2005-09-30"),]
-		  }
-		}
-		
-		# Remove Rock River at Afton 1997 TSS data (very wide confidence interval)
-		if (stations$abbrev[s]=="ROA") {
-		  if(parameters$abbrev[p]=="TSS") {
-		    Sample = Sample[Sample$Date<as.Date("1996-10-01") | Sample$Date>as.Date("1997-09-30"),]
-		  }
-		}
-		
-		# Remove Bad River 1981-2005 TSS data (very wide confidence interval)
-		if (stations$abbrev[s]=="BAD") {
-		  if(parameters$abbrev[p]=="TSS") {
-		    Sample = Sample[Sample$Date<as.Date("1981-10-01") | Sample$Date>as.Date("2006-09-30"),]
-		  }
-		}
 
 		# Prune Sample and Daily
     		# Prune WYs with incomplete flow records
