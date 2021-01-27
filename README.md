@@ -8,4 +8,4 @@ To adapt this analysis to a new location:
     - [models.R](models.R)
     - [bootstrap.R](bootstrap.R)
     - [summary.R](summary.R)
-    - [app.R](app.R)
+ 3. Edit [app.R](app.R) to reflect the changes you made to stations and parameters and to desribe your application on the methods tab.
